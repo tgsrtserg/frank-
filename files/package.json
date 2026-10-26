@@ -1,0 +1,15 @@
+{
+  "name": "schematic-builder-bot",
+  "version": "1.0.0",
+  "description": "Mineflayer bot that builds .schem / .schematic files in a Java Edition world",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.23.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "prismarine-schematic": "^1.2.3",
+    "vec3": "^0.1.10"
+  }
+}
