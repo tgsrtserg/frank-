@@ -1,0 +1,93 @@
+name: Build JAR
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # Folder that contains index.js and package.json.
+  # Use "." for the repo root, or e.g. "files" if you put them in that folder.
+  APP_DIR: .
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install bot dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: npm install --omit=dev
+
+      - name: Write Java launcher
+        run: |
+          mkdir -p build/classes
+          cat > build/Launcher.java << 'EOF'
+          import java.io.*;
+          import java.nio.file.*;
+          import java.util.*;
+          import java.util.jar.*;
+
+          public class Launcher {
+            public static void main(String[] args) throws Exception {
+              File self = new File(Launcher.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+              File out = new File("bot-app");
+              String outPath = out.getCanonicalPath();
+
+              // Unpack the bundled bot next to the jar
+              try (JarFile jar = new JarFile(self)) {
+                for (Enumeration<JarEntry> e = jar.entries(); e.hasMoreElements();) {
+                  JarEntry en = e.nextElement();
+                  String name = en.getName();
+                  if (!name.startsWith("app/") || name.equals("app/")) continue;
+                  File f = new File(out, name.substring(4));
+                  if (!f.getCanonicalPath().startsWith(outPath)) continue;
+                  if (en.isDirectory()) { f.mkdirs(); continue; }
+                  if (f.exists() && f.length() == en.getSize()) continue;
+                  f.getParentFile().mkdirs();
+                  try (InputStream in = jar.getInputStream(en)) {
+                    Files.copy(in, f.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                  }
+                }
+              }
+
+              // Schematics live in ./schematics next to the jar
+              File schem = new File("schematics");
+              schem.mkdirs();
+
+              ProcessBuilder pb = new ProcessBuilder("node", "index.js");
+              pb.directory(out);
+              pb.environment().putIfAbsent("MC_SCHEM_DIR", schem.getAbsolutePath());
+              pb.inheritIO();
+              try {
+                System.exit(pb.start().waitFor());
+              } catch (IOException ex) {
+                System.err.println("Node.js was not found. Install Node 18+ from https://nodejs.org");
+                System.exit(1);
+              }
+            }
+          }
+          EOF
+
+      - name: Build the jar
+        run: |
+          mkdir -p build/jar/app
+          rsync -a --exclude='.git' --exclude='/.github' --exclude='/build' "$APP_DIR"/ build/jar/app/
+          javac -d build/classes build/Launcher.java
+          printf 'Main-Class: Launcher\n' > build/manifest.txt
+          jar cfm build/schematic-builder-bot.jar build/manifest.txt -C build/classes . -C build/jar app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schematic-builder-bot
+          path: build/schematic-builder-bot.jar
